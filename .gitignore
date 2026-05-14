@@ -1,0 +1,27 @@
+# 依赖与构建产物
+**/node_modules/
+**/dist/
+**/.tmp/
+*.tsbuildinfo
+
+# 本地密钥与环境（勿提交真实路径与证书）
+.env
+backend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# 课程离线 Fabric 包体积极大，勿提交；虚拟机按课程资源或 README 自行解压
+fabric-packages/
+
+# 链码 vendor 在虚拟机用 go mod vendor 重新生成即可
+score-chaincode/vendor/
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE（可选）
+.idea/
+.vscode/*
+!.vscode/extensions.json

@@ -1,0 +1,10 @@
+#nprogress .bar {
+  height: 3px;
+  background: linear-gradient(90deg, #22d3ee, #6366f1, #a78bfa);
+}
+
+#nprogress .peg {
+  box-shadow:
+    0 0 10px #6366f1,
+    0 0 5px #22d3ee;
+}

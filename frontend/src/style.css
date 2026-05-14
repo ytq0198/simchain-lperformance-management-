@@ -1,0 +1,6 @@
+/* 与 Tailwind、Element Plus 深色变量共存 */
+body {
+  margin: 0;
+  background-color: #0b1220;
+  color: #e2e8f0;
+}
