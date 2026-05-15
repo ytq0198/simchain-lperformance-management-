@@ -3,8 +3,9 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useClipboard } from '@vueuse/core';
 import { ElMessage } from 'element-plus';
-import { fetchHistory, type HistoryEntry, type ScoreRecord } from '../api/score';
+import { fetchHistory, fetchTxInsight, type HistoryEntry, type ScoreRecord, type TxInsightResponse } from '../api/score';
 import { formatUnixSeconds } from '../utils/format';
+import TraceHelixBlocks from '../components/decorative/TraceHelixBlocks.vue';
 
 const route = useRoute();
 const { copy } = useClipboard();
@@ -20,6 +21,8 @@ const list = ref<HistoryEntry[]>([]);
 const dialogVisible = ref(false);
 const selected = ref<HistoryEntry | null>(null);
 const selectedIndex = ref(-1);
+const txInsight = ref<TxInsightResponse | null>(null);
+const insightLoading = ref(false);
 
 /** API 返回为「新版本在前」；时间轴按时间正序展示 */
 const chronological = computed(() => [...list.value].reverse());
@@ -32,6 +35,7 @@ function syncFromRoute() {
 
 function eventLabel(entry: HistoryEntry, idx: number, total: number): string {
   if (entry.record.status === 'REVOKED') return '成绩作废（终态）';
+  if (entry.record.status === 'PENDING') return '待教务处审核（PENDING）';
   const r = entry.record.remark || '';
   if (r.includes('更正')) return '成绩更正';
   if (r.includes('作废')) return '作废操作';
@@ -40,9 +44,10 @@ function eventLabel(entry: HistoryEntry, idx: number, total: number): string {
   return '链上状态变更';
 }
 
-/** 节点配色：绿=初始、蓝=更正、红=作废 */
-function nodeKind(entry: HistoryEntry, idx: number): 'initial' | 'correct' | 'revoke' | 'other' {
+/** 节点配色：绿=初始、蓝=更正、红=作废、琥珀=待审 */
+function nodeKind(entry: HistoryEntry, idx: number): 'initial' | 'correct' | 'revoke' | 'pending' | 'other' {
   if (entry.record.status === 'REVOKED') return 'revoke';
+  if (entry.record.status === 'PENDING') return 'pending';
   const r = entry.record.remark || '';
   if (r.includes('更正')) return 'correct';
   if (idx === 0) return 'initial';
@@ -53,6 +58,7 @@ const nodeRing = {
   initial: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.25)]',
   correct: 'border-sky-500/60 bg-sky-500/15 text-sky-100 shadow-[0_0_14px_rgba(56,189,248,0.2)]',
   revoke: 'border-rose-500/60 bg-rose-500/15 text-rose-100 shadow-[0_0_14px_rgba(244,63,94,0.22)]',
+  pending: 'border-amber-500/60 bg-amber-500/15 text-amber-100 shadow-[0_0_14px_rgba(245,158,11,0.22)]',
   other: 'border-cyan-400/50 bg-slate-900 text-cyan-200 shadow-[0_0_12px_rgba(34,211,238,0.2)]',
 };
 
@@ -60,6 +66,7 @@ const cardBorder = {
   initial: 'hover:border-emerald-500/40',
   correct: 'hover:border-sky-500/40',
   revoke: 'hover:border-rose-500/40',
+  pending: 'hover:border-amber-500/40',
   other: 'hover:border-cyan-500/35',
 };
 
@@ -107,10 +114,32 @@ async function load() {
   }
 }
 
-function openDetail(row: HistoryEntry) {
+async function loadTxInsight() {
+  if (!selected.value || !form.studentId || !form.courseId || !form.semester) {
+    txInsight.value = null;
+    return;
+  }
+  insightLoading.value = true;
+  txInsight.value = null;
+  try {
+    txInsight.value = await fetchTxInsight({
+      studentId: form.studentId,
+      courseId: form.courseId,
+      semester: form.semester,
+      txId: selected.value.txId,
+    });
+  } catch {
+    txInsight.value = null;
+  } finally {
+    insightLoading.value = false;
+  }
+}
+
+async function openDetail(row: HistoryEntry) {
   selected.value = row;
   selectedIndex.value = chronological.value.findIndex((e) => e.txId === row.txId);
   dialogVisible.value = true;
+  await loadTxInsight();
 }
 
 async function copyTx(id: string) {
@@ -171,7 +200,9 @@ watch(
       </p>
     </div>
 
-    <div v-else class="relative pl-2">
+    <div v-else class="relative z-0 min-h-[120px] pl-2">
+      <TraceHelixBlocks class="-left-1 sm:-left-0" :version-count="chronological.length" />
+      <div class="relative z-10">
       <div class="absolute bottom-0 left-[11px] top-2 w-px bg-gradient-to-b from-cyan-500/50 via-slate-600 to-transparent" />
       <div
         v-for="(item, idx) in chronological"
@@ -214,6 +245,7 @@ watch(
           </p>
           <code class="mt-2 block truncate font-mono text-[11px] text-cyan-100/80">{{ item.txId }}</code>
         </div>
+      </div>
       </div>
     </div>
 
@@ -258,6 +290,29 @@ watch(
         <div v-else class="mb-4 rounded-lg border border-slate-600/50 bg-slate-900/50 p-3 text-xs text-slate-400">
           链上最早版本，无「上一版本」可对比；下方为完整 JSON。
         </div>
+
+        <el-divider content-position="left">读写集叙事（后端解析历史）</el-divider>
+        <el-skeleton v-if="insightLoading" :rows="3" animated />
+        <div v-else-if="txInsight" class="mb-4 space-y-2 rounded-lg border border-cyan-500/20 bg-slate-950/60 p-3 text-xs">
+          <p class="text-slate-300">{{ txInsight.narrative.summary }}</p>
+          <div>
+            <span class="text-slate-500">键：</span>
+            <code class="break-all text-cyan-100/90">{{ txInsight.worldStateKey }}</code>
+          </div>
+          <div v-if="txInsight.narrative.readSet?.length" class="mt-2">
+            <div class="font-medium text-amber-200/90">读取（上一版本摘要）</div>
+            <pre class="mt-1 max-h-28 overflow-auto rounded bg-slate-900/80 p-2 text-[11px] text-slate-300">{{
+              JSON.stringify(txInsight.narrative.readSet, null, 2)
+            }}</pre>
+          </div>
+          <div v-if="txInsight.narrative.writeSet?.length" class="mt-2">
+            <div class="font-medium text-emerald-200/90">写入（本交易后）</div>
+            <pre class="mt-1 max-h-28 overflow-auto rounded bg-slate-900/80 p-2 text-[11px] text-slate-300">{{
+              JSON.stringify(txInsight.narrative.writeSet, null, 2)
+            }}</pre>
+          </div>
+        </div>
+        <div v-else-if="!insightLoading" class="mb-4 text-xs text-slate-500">（无法加载 tx-insight）</div>
 
         <div class="text-xs font-medium text-slate-400">原始 JSON</div>
         <pre

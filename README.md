@@ -2,6 +2,10 @@
 
 Hyperledger Fabric **`test-network`** 上的 **`score`** 链码 + 虚拟机 **Node 后端（REST + JWT）** + 宿主机 **Vue 3 前端**。日常**不修改业务源码**的启动顺序见根目录 **[`操作说明.md`](./操作说明.md) §〇**（Fabric → 后端 → 自检 → 前端）。
 
+**能力摘要（链码须 `deployCC` 至含下列接口的版本，建议 `1.2`）**：教师录入 **PENDING**、教务处 **ApproveScore**；学生 **SubmitAppeal** / 教师 **ResolveAppeal**；REST **tx-insight**、**双 Org 读一致性**、**SSE 提交通知**、**证书 PEM 摘要**。
+
+**一键启动后端**：[`scripts/start_backend.sh`](./scripts/start_backend.sh)；链码升版提示：[`scripts/deploy_score_cc_hint.sh`](./scripts/deploy_score_cc_hint.sh)。
+
 ---
 
 ## 文档入口
@@ -23,4 +27,4 @@ Hyperledger Fabric **`test-network`** 上的 **`score`** 链码 + 虚拟机 **No
 - **`backend/`** — Express + Fabric Gateway + JWT  
 - **`frontend/`** — Vite + Vue 3 + Element Plus  
 
-**Fabric 离线包**（如 `fabric-packages/`）通常不提交远程；虚拟机按课程资源自备 **`test-network`**，与 **`操作说明.md` §二** 一致。
+**Fabric 离线包**（宿主机 **`fabric-packages/`**，**不提交 Git**）拷入虚拟机 **`~/work/fabric-packages`**；业务代码同置于 **`~/work/backend`**、**`score-chaincode`** 等，见 **`操作说明.md` §二**。

@@ -2,6 +2,8 @@
 
 **链码已提交到通道后**，启动 **Node 后端** 与 **宿主机前端** 的推荐顺序见根目录 **`操作说明.md` §〇**（**Fabric → 后端 → 自检 → 前端**），并与 **`backend/README.md`**、**`frontend/README.md`** 中「日常启动 / 联调顺序」一致；当日未改链码逻辑时**不必**重复 **`deployCC`**。
 
+**版本提示（2026-05 起）**：仓库内链码含 **`PENDING` / `ApproveScore` / 申诉** 等接口；若你虚拟机仍为旧 **Sequence**，请在本目录 **`go mod tidy` + `vendor`** 后按 **`./network.sh deployCC … -ccv 1.2`**（**`-ccs` 比当前 +1**）升版，否则后端 **`PutScore` 六参** 会失败。
+
 ---
 
 ## 宿主机拖拽到 `~/work` 时：权限怎么一劳永逸
@@ -60,13 +62,18 @@ ls -ld ~/work/score-chaincode   # 确认目录为 drwx...（含 w）
 
 ## 拖到 **`~/work`（文件管理器里常显示为 Home/work）** 时的约定
 
-在 Linux 里 **`~/work`** 与 **`/home/你的用户名/work`** 是**同一路径**（例如 **`/home/tony/work`**）。你把 **`backend`、`score-chaincode`、`fabric-packages`** 拖到这里时，建议固定成：
+在 Linux 里 **`~/work`** 与 **`/home/你的用户名/work`** 是**同一路径**（本实验为 **`/home/tony/work`**）。建议固定布局：
 
-| 拖入内容 | 虚拟机上的路径 |
-|----------|----------------|
+| 内容 | 虚拟机上的路径 |
+|------|----------------|
+| 工作区根 | **`~/work/`** |
 | 后端 | **`~/work/backend`** |
 | 链码 | **`~/work/score-chaincode`** |
+| 前端（可选） | **`~/work/frontend`** |
 | Fabric 样本与网络 | **`~/work/fabric-packages/.../fabric-samples/test-network`** |
+| 运维脚本 | **`~/work/scripts`** |
+
+宿主机 **`final-project/fabric-packages`** 含完整 **`organizations/cryptogen`** 与 **`configtx/`**（**不提交 Git**）；拷入 VM 时**勿只拷 peerOrganizations**，须保留 **cryptogen 模板**。
 
 下面「拖拽 backend」与上文 **`fixwork`** / **`chmod`** 均按 **`~/work/...`** 来写。
 
@@ -148,6 +155,30 @@ sudo systemctl restart docker
 ---
 
 **以下步骤从 1 开始；凡从 Windows 拖拽覆盖过 `~/work` 下文件，建议先做上文「拖拽与权限」或本段 `chmod`。**
+
+## MSP 证书过期（`signing identity expired`）
+
+**现象**：`docker logs peer0.org1` 出现 **`signing identity expired … ago`**，容器 **Exited**。
+
+**处理**（在 **`test-network`** 目录）：
+
+```bash
+./network.sh down
+rm -rf organizations/peerOrganizations organizations/ordererOrganizations
+rm -rf channel-artifacts system-genesis-block
+# 勿删 organizations/cryptogen 与 configtx/
+./network.sh up
+./network.sh createChannel
+# 须重新 deployCC（见下文）
+```
+
+## 误删 `organizations/cryptogen`
+
+**现象**：`./network.sh up` 报 **`crypto-config-org1.yaml: no such file`**。
+
+**处理**：从宿主机 **`final-project/fabric-packages/.../organizations/cryptogen`** 拷回；或按 **`操作说明.md` §二 2.3** 用 **curl** 从 **fabric-samples v2.4.6** 下载。**勿**寻找 **`cfggen`**（2.4.6 使用 **`configtx/configtx.yaml`**）。
+
+---
 
 1. **`go.mod` 中的 `go` 版本须与打包环境一致**（建议 **`go 1.18`**，与 Fabric 2.4 **ccenv** 及本机 `go mod vendor` 一致）。若出现 **`inconsistent vendoring` / `not marked as explicit in vendor/modules.txt`**：在链码目录删除 **`vendor/`** 后执行 **`go mod tidy`** 再 **`go mod vendor`**，勿混用旧版 **`go 1.14`** 与新版 Go 生成的 **`vendor`**。
 

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { authUser, canWriteScores, clearAuth, roleLabel } from './stores/auth';
+import WorkspaceAmbientBackground from './components/decorative/WorkspaceAmbientBackground.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -23,6 +24,7 @@ const nav = computed(() => {
     return [
       { to: '/verify', label: '验真与凭证', show: true },
       { to: '/explorer', label: '链上浏览器', show: true },
+      { to: '/fabric-identity', label: '链上身份', show: true },
     ];
   }
   if (r === 'Student') {
@@ -31,6 +33,8 @@ const nav = computed(() => {
       { to: '/scores', label: '成绩查询', show: true },
       { to: '/scores/history', label: '全链路溯源', show: true },
       { to: '/my-certificates', label: '我的证书', show: true },
+      { to: '/appeals', label: '成绩申诉', show: true },
+      { to: '/fabric-identity', label: '链上身份', show: true },
     ];
   }
   return [
@@ -41,7 +45,10 @@ const nav = computed(() => {
     { to: '/scores/new', label: '录入上链', show: canWrite.value },
     { to: '/scores/correct', label: '成绩更正', show: canWrite.value },
     { to: '/scores/revoke', label: '成绩作废', show: canWrite.value },
+    { to: '/scores/approve', label: '成绩审核', show: r === 'Academic_Affairs' },
+    { to: '/appeals/inbox', label: '申诉处理', show: canWrite.value },
     { to: '/verify', label: '验真与凭证', show: true },
+    { to: '/fabric-identity', label: '链上身份', show: true },
   ];
 });
 
@@ -56,9 +63,10 @@ function logout() {
     <router-view />
   </div>
 
-  <div v-else class="flex min-h-screen bg-[#0b1220] text-slate-200">
+  <div v-else class="relative flex min-h-screen text-slate-200">
+    <WorkspaceAmbientBackground :role="authUser?.role ?? null" />
     <aside
-      class="flex w-60 shrink-0 flex-col border-r border-cyan-500/10 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 shadow-[inset_-1px_0_0_rgba(34,211,238,0.06)]"
+      class="relative z-10 flex w-60 shrink-0 flex-col border-r border-cyan-500/10 bg-gradient-to-b from-slate-950/95 via-slate-900/92 to-slate-950/95 shadow-[inset_-1px_0_0_rgba(34,211,238,0.06)] backdrop-blur-sm"
     >
       <div class="border-b border-slate-700/60 px-4 py-5">
         <div class="text-xs font-medium uppercase tracking-[0.2em] text-cyan-400/90">Fabric Console</div>
@@ -98,9 +106,9 @@ function logout() {
       </div>
     </aside>
 
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="relative z-10 flex min-w-0 flex-1 flex-col">
       <header
-        class="flex h-14 shrink-0 items-center justify-between border-b border-slate-700/60 bg-slate-950/80 px-6 backdrop-blur"
+        class="flex h-14 shrink-0 items-center justify-between border-b border-slate-700/60 bg-slate-950/75 px-6 backdrop-blur-md"
       >
         <div class="flex min-w-0 flex-col gap-0.5">
           <el-breadcrumb separator="/">

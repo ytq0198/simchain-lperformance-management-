@@ -9,8 +9,10 @@ import './style.css';
 import App from './App.vue';
 import router from './router';
 import { restoreAuth, validateSession } from './stores/auth';
+import { setupCommitSse } from './composables/useCommitSse';
 
 restoreAuth();
+setupCommitSse();
 
 const app = createApp(App);
 app.use(ElementPlus);

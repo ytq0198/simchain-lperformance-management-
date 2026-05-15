@@ -13,6 +13,7 @@ import VChart from 'vue-echarts';
 import { fetchHealth, type HealthResponse } from '../api/score';
 import { authUser } from '../stores/auth';
 import TopologyOrg12 from '../components/TopologyOrg12.vue';
+import DashboardDataFlowBg from '../components/decorative/DashboardDataFlowBg.vue';
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent]);
 
@@ -157,6 +158,16 @@ const liveTone = computed(() => {
 
 const isStudentView = computed(() => authUser.value?.role === 'Student');
 
+const bgMx = ref(0.5);
+const bgMy = ref(0.5);
+
+function onDashboardMove(e: MouseEvent) {
+  const el = e.currentTarget as HTMLElement;
+  const r = el.getBoundingClientRect();
+  bgMx.value = (e.clientX - r.left) / Math.max(r.width, 1);
+  bgMy.value = (e.clientY - r.top) / Math.max(r.height, 1);
+}
+
 const statCards = computed(() => {
   const h = health.value;
   return [
@@ -209,7 +220,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="relative min-h-[320px]" @mousemove="onDashboardMove">
+    <DashboardDataFlowBg :mx="bgMx" :my="bgMy" />
+    <div class="relative z-10 space-y-6">
     <el-alert
       v-if="isStudentView"
       type="success"
@@ -282,7 +295,7 @@ onUnmounted(() => {
       <div
         v-for="c in statCards"
         :key="c.key"
-        class="group relative overflow-hidden rounded-xl border border-slate-700/60 bg-slate-950/50 p-4 shadow-lg transition hover:border-cyan-500/25"
+        class="group relative overflow-hidden rounded-xl border border-slate-700/60 bg-slate-950/50 p-4 shadow-lg backdrop-blur-md transition hover:border-cyan-500/25"
       >
         <div
           class="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-cyan-500/10 blur-2xl transition group-hover:bg-cyan-400/15"
@@ -324,10 +337,10 @@ onUnmounted(() => {
     </div>
 
     <div class="grid gap-6 lg:grid-cols-5">
-      <div class="rounded-xl border border-slate-700/60 bg-slate-950/40 p-4 lg:col-span-3">
+      <div class="rounded-xl border border-slate-700/60 bg-slate-950/40 p-4 backdrop-blur-md lg:col-span-3">
         <v-chart class="h-72 w-full" :option="chartOption" autoresize />
       </div>
-      <div class="rounded-xl border border-slate-700/60 bg-slate-950/40 p-4 lg:col-span-2">
+      <div class="rounded-xl border border-slate-700/60 bg-slate-950/40 p-4 backdrop-blur-md lg:col-span-2">
         <div class="mb-3 flex items-center justify-between">
           <span class="text-sm font-medium text-slate-200">最新区块流（演示 · 自动滑入）</span>
           <span class="text-[10px] text-amber-200/80">约 7s 模拟新区块</span>
@@ -350,6 +363,7 @@ onUnmounted(() => {
           </li>
         </transition-group>
       </div>
+    </div>
     </div>
   </div>
 </template>

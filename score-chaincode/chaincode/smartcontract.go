@@ -10,11 +10,14 @@ import (
 )
 
 const (
-	statusActive   = "ACTIVE"
-	statusRevoked  = "REVOKED"
+	statusPending = "PENDING"
+	statusActive  = "ACTIVE"
+	statusRevoked = "REVOKED"
 )
 
-// SmartContract 成绩存证（生命周期 + 历史 + 验真）
+const appealObjectType = "APPEAL"
+
+// SmartContract 成绩存证（生命周期 + 历史 + 验真 + 待审核 + 申诉）
 type SmartContract struct {
 	contractapi.Contract
 }
@@ -25,7 +28,7 @@ type ScoreRecord struct {
 	CourseID  string `json:"courseId"`
 	Semester  string `json:"semester"`
 	Score     int    `json:"score"`
-	Status    string `json:"status"`    // ACTIVE | REVOKED
+	Status    string `json:"status"`    // PENDING | ACTIVE | REVOKED
 	UpdatedAt int64  `json:"updatedAt"` // 交易时间（秒），便于报表
 	Operator  string `json:"operator"`  // 调用者 MSP ID
 	Remark    string `json:"remark"`    // 更正/作废说明
@@ -33,10 +36,10 @@ type ScoreRecord struct {
 
 // ScoreHistoryItem 单条键历史（用于溯源）
 type ScoreHistoryItem struct {
-	TxId          string        `json:"txId"`
-	TimestampUnix int64         `json:"timestampUnix"`
-	IsDelete      bool          `json:"isDelete"`
-	Record        *ScoreRecord  `json:"record,omitempty"`
+	TxId          string       `json:"txId"`
+	TimestampUnix int64        `json:"timestampUnix"`
+	IsDelete      bool         `json:"isDelete"`
+	Record        *ScoreRecord `json:"record,omitempty"`
 }
 
 // VerifyResult 验真结果
@@ -45,6 +48,18 @@ type VerifyResult struct {
 	Reason  string `json:"reason"`
 	Current int    `json:"current,omitempty"`
 	Status  string `json:"status,omitempty"`
+}
+
+// AppealRecord 学生申诉（独立复合键，便于按学号列举）
+type AppealRecord struct {
+	StudentID  string `json:"studentId"`
+	CourseID   string `json:"courseId"`
+	Semester   string `json:"semester"`
+	Reason     string `json:"reason"`
+	Status     string `json:"status"` // OPEN | RESOLVED
+	Resolution string `json:"resolution,omitempty"`
+	CreatedAt  int64  `json:"createdAt"`
+	ResolvedAt int64  `json:"resolvedAt,omitempty"`
 }
 
 func makeKey(studentID, courseID, semester string) string {
@@ -72,6 +87,17 @@ func assertOrg1Mutate(ctx contractapi.TransactionContextInterface) error {
 		return err
 	} else if found && (role == "student" || role == "verifier") {
 		return fmt.Errorf("ABAC: 身份属性 abac.role=%s 禁止写入成绩", role)
+	}
+	return nil
+}
+
+func assertOrg2StudentAppeal(ctx contractapi.TransactionContextInterface) error {
+	msp, err := cid.GetMSPID(ctx.GetStub())
+	if err != nil {
+		return fmt.Errorf("ABAC: 读取 MSP 失败: %w", err)
+	}
+	if msp != "Org2MSP" {
+		return fmt.Errorf("ABAC: 申诉仅允许 Org2MSP 提交，当前 MSP=%s", msp)
 	}
 	return nil
 }
@@ -114,8 +140,20 @@ func putScoreRecord(ctx contractapi.TransactionContextInterface, key string, rec
 	return ctx.GetStub().PutState(key, b)
 }
 
-// PutScore 写入或覆盖一条成绩（兼容旧 CLI：Args 后四位为学号、课程、学期、分数）
-func (s *SmartContract) PutScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, scoreStr string) error {
+// actor: "" / "DEAN" → 直接生效 ACTIVE；"TEACHER" → 待教务处审核 PENDING（应用层须对应 JWT 角色传参）
+func pickInitialStatus(actor string) (string, error) {
+	switch actor {
+	case "", "DEAN":
+		return statusActive, nil
+	case "TEACHER":
+		return statusPending, nil
+	default:
+		return "", fmt.Errorf("invalid actor %q: use TEACHER or DEAN", actor)
+	}
+}
+
+// PutScore 写入成绩：Args 为学号、课程、学期、分数、actor（""|DEAN→ACTIVE，TEACHER→PENDING）。CLI/旧脚本须显式传第六参 DEAN 以保持与旧行为一致。
+func (s *SmartContract) PutScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, scoreStr, actor string) error {
 	if err := assertOrg1Mutate(ctx); err != nil {
 		return err
 	}
@@ -123,13 +161,18 @@ func (s *SmartContract) PutScore(ctx contractapi.TransactionContextInterface, st
 	if err != nil {
 		return fmt.Errorf("invalid score: %w", err)
 	}
+	act := actor
+	st, err := pickInitialStatus(act)
+	if err != nil {
+		return err
+	}
 	key := makeKey(studentID, courseID, semester)
 	rec := ScoreRecord{
 		StudentID: studentID,
 		CourseID:  courseID,
 		Semester:  semester,
 		Score:     score,
-		Status:    statusActive,
+		Status:    st,
 		UpdatedAt: txUnixSeconds(ctx),
 		Operator:  operatorMSP(ctx),
 		Remark:    "",
@@ -137,7 +180,34 @@ func (s *SmartContract) PutScore(ctx contractapi.TransactionContextInterface, st
 	return putScoreRecord(ctx, key, &rec)
 }
 
-// CorrectScore 更正分数（逻辑上仍为同一条业务记录；链下可通过 GetScoreHistory 看版本）
+// ApproveScore 教务处审核：PENDING → ACTIVE
+func (s *SmartContract) ApproveScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester string) error {
+	if err := assertOrg1Mutate(ctx); err != nil {
+		return err
+	}
+	key := makeKey(studentID, courseID, semester)
+	cur, err := readScore(ctx, key)
+	if err != nil {
+		return err
+	}
+	if cur == nil {
+		return fmt.Errorf("score not found for key %s", key)
+	}
+	if cur.Status != statusPending {
+		return fmt.Errorf("only PENDING scores can be approved, current status=%s", cur.Status)
+	}
+	cur.Status = statusActive
+	cur.UpdatedAt = txUnixSeconds(ctx)
+	cur.Operator = operatorMSP(ctx)
+	if cur.Remark == "" {
+		cur.Remark = "教务处审核通过"
+	} else {
+		cur.Remark = cur.Remark + "；教务处审核通过"
+	}
+	return putScoreRecord(ctx, key, cur)
+}
+
+// CorrectScore 更正分数（PENDING / ACTIVE 均可；REVOKED 不可）
 func (s *SmartContract) CorrectScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, newScoreStr, remark string) error {
 	if err := assertOrg1Mutate(ctx); err != nil {
 		return err
@@ -158,7 +228,6 @@ func (s *SmartContract) CorrectScore(ctx contractapi.TransactionContextInterface
 		return fmt.Errorf("cannot correct revoked score for key %s", key)
 	}
 	cur.Score = score
-	cur.Status = statusActive
 	cur.UpdatedAt = txUnixSeconds(ctx)
 	cur.Operator = operatorMSP(ctx)
 	cur.Remark = remark
@@ -237,7 +306,7 @@ func (s *SmartContract) GetScoreHistory(ctx contractapi.TransactionContextInterf
 	return out, nil
 }
 
-// VerifyScore 将「声称分数」与链上当前记录比对（作废记录不匹配）
+// VerifyScore 将「声称分数」与链上当前记录比对（作废 / 待审核单独说明）
 func (s *SmartContract) VerifyScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, claimedScoreStr string) (*VerifyResult, error) {
 	claimed, err := strconv.Atoi(claimedScoreStr)
 	if err != nil {
@@ -254,6 +323,22 @@ func (s *SmartContract) VerifyScore(ctx contractapi.TransactionContextInterface,
 	if rec.Status == statusRevoked {
 		return &VerifyResult{Match: false, Reason: "record is revoked", Current: rec.Score, Status: rec.Status}, nil
 	}
+	if rec.Status == statusPending {
+		if rec.Score == claimed {
+			return &VerifyResult{
+				Match:   true,
+				Reason:  "score matches but record pending approval (not formally published)",
+				Current: rec.Score,
+				Status:  rec.Status,
+			}, nil
+		}
+		return &VerifyResult{
+			Match:   false,
+			Reason:  "score mismatch (record pending approval)",
+			Current: rec.Score,
+			Status:  rec.Status,
+		}, nil
+	}
 	if rec.Score != claimed {
 		return &VerifyResult{
 			Match:   false,
@@ -263,4 +348,128 @@ func (s *SmartContract) VerifyScore(ctx contractapi.TransactionContextInterface,
 		}, nil
 	}
 	return &VerifyResult{Match: true, Reason: "ok", Current: rec.Score, Status: rec.Status}, nil
+}
+
+// SubmitAppeal 学生发起申诉（Org2MSP）
+func (s *SmartContract) SubmitAppeal(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, reason string) error {
+	if err := assertOrg2StudentAppeal(ctx); err != nil {
+		return err
+	}
+	if reason == "" {
+		return fmt.Errorf("reason is required")
+	}
+	txID := ctx.GetStub().GetTxID()
+	ck, err := ctx.GetStub().CreateCompositeKey(appealObjectType, []string{studentID, courseID, semester, txID})
+	if err != nil {
+		return err
+	}
+	rec := AppealRecord{
+		StudentID: studentID,
+		CourseID:  courseID,
+		Semester:  semester,
+		Reason:    reason,
+		Status:    "OPEN",
+		CreatedAt: txUnixSeconds(ctx),
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	return ctx.GetStub().PutState(ck, b)
+}
+
+// ResolveAppeal 教务/教师处理申诉（Org1MSP）；compositeKey 为列表接口返回的 compositeKey
+func (s *SmartContract) ResolveAppeal(ctx contractapi.TransactionContextInterface, compositeKey, resolution string) error {
+	if err := assertOrg1Mutate(ctx); err != nil {
+		return err
+	}
+	if resolution == "" {
+		return fmt.Errorf("resolution is required")
+	}
+	b, err := ctx.GetStub().GetState(compositeKey)
+	if err != nil {
+		return err
+	}
+	if b == nil {
+		return fmt.Errorf("appeal not found")
+	}
+	var rec AppealRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return err
+	}
+	if rec.Status != "OPEN" {
+		return fmt.Errorf("appeal already resolved")
+	}
+	rec.Status = "RESOLVED"
+	rec.Resolution = resolution
+	rec.ResolvedAt = txUnixSeconds(ctx)
+	out, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	return ctx.GetStub().PutState(compositeKey, out)
+}
+
+// AppealListItem 列表项
+type AppealListItem struct {
+	CompositeKey string       `json:"compositeKey"`
+	Appeal       AppealRecord `json:"appeal"`
+}
+
+// ListOpenAppeals 列出待处理申诉（Org1 查询）
+func (s *SmartContract) ListOpenAppeals(ctx contractapi.TransactionContextInterface) ([]AppealListItem, error) {
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey(appealObjectType, []string{})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var out []AppealListItem
+	for iter.HasNext() {
+		kv, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		var rec AppealRecord
+		if err := json.Unmarshal(kv.GetValue(), &rec); err != nil {
+			return nil, err
+		}
+		if rec.Status != "OPEN" {
+			continue
+		}
+		out = append(out, AppealListItem{
+			CompositeKey: kv.GetKey(),
+			Appeal:       rec,
+		})
+	}
+	return out, nil
+}
+
+// ListMyAppeals 学生查看本人申诉（Org2；按学号前缀）
+func (s *SmartContract) ListMyAppeals(ctx contractapi.TransactionContextInterface, studentID string) ([]AppealListItem, error) {
+	if err := assertOrg2StudentAppeal(ctx); err != nil {
+		return nil, err
+	}
+	iter, err := ctx.GetStub().GetStateByPartialCompositeKey(appealObjectType, []string{studentID})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var out []AppealListItem
+	for iter.HasNext() {
+		kv, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		var rec AppealRecord
+		if err := json.Unmarshal(kv.GetValue(), &rec); err != nil {
+			return nil, err
+		}
+		out = append(out, AppealListItem{
+			CompositeKey: kv.GetKey(),
+			Appeal:       rec,
+		})
+	}
+	return out, nil
 }

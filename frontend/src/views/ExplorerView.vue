@@ -57,6 +57,10 @@ const filtered = computed(() => {
         教学演示用「迷你浏览器」：展示区块高度、时间戳与交易笔数。当前为<strong class="text-amber-200/90">静态演示数据</strong>；若对接
         Orderer / Couch 或后端聚合接口，可替换为实时区块流。
       </p>
+      <p class="mt-2 max-w-3xl text-xs text-slate-500">
+        单笔交易「读旧写新」的叙事化展示见 <strong class="text-cyan-200/80">全链路溯源</strong>：点击时间轴节点，对话框内「读写集叙事」由后端
+        <code class="text-cyan-200/80">GET /api/scores/tx-insight</code> 基于 <code class="text-cyan-200/80">GetScoreHistory</code> 解析生成。
+      </p>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">

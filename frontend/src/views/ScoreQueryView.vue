@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { ElMessage } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import QRCode from 'qrcode';
-import { fetchHistory, fetchScore, type ScoreRecord } from '../api/score';
+import { fetchHistory, fetchScore, fetchIntegrityScoreRead, type ScoreRecord } from '../api/score';
 import { formatUnixSeconds } from '../utils/format';
 import { courseIdRules, semesterRules, studentIdRules } from '../utils/validators';
 
@@ -22,6 +23,8 @@ const rules: FormRules = {
 };
 
 const loading = ref(false);
+const integrityLoading = ref(false);
+const integrityMsg = ref('');
 const record = ref<ScoreRecord | null>(null);
 /** 键历史迭代器通常最新在前，取首条交易的 txId 用于验真二维码 */
 const latestTxId = ref('');
@@ -85,6 +88,26 @@ function goHistory() {
     path: '/scores/history',
     query: { studentId: form.studentId, courseId: form.courseId, semester: form.semester },
   });
+}
+
+async function runIntegrity() {
+  if (!formRef.value) return;
+  await formRef.value.validate();
+  integrityLoading.value = true;
+  integrityMsg.value = '';
+  try {
+    const r = await fetchIntegrityScoreRead({
+      studentId: form.studentId,
+      courseId: form.courseId,
+      semester: form.semester,
+    });
+    integrityMsg.value = r.message;
+    ElMessage[r.ok ? 'success' : 'warning'](r.message);
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '自检失败');
+  } finally {
+    integrityLoading.value = false;
+  }
 }
 
 function openVerifyFromQrLink() {
@@ -160,14 +183,25 @@ function escapeHtml(s: string) {
       <el-form-item>
         <el-button type="primary" :loading="loading" @click="onQuery">查询链上成绩</el-button>
         <el-button :disabled="!record" @click="goHistory">查看链上历史</el-button>
+        <el-button :loading="integrityLoading" @click="runIntegrity">双 Org 读一致性自检</el-button>
       </el-form-item>
     </el-form>
+
+    <el-alert
+      v-if="integrityMsg"
+      type="info"
+      :closable="true"
+      @close="integrityMsg = ''"
+      class="max-w-2xl border border-cyan-500/20 bg-cyan-950/20"
+      :title="integrityMsg"
+    />
 
     <el-card v-if="record" shadow="never" class="border border-slate-700/50 bg-slate-950/40">
       <template #header>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <span>当前链上记录</span>
           <div class="flex flex-wrap gap-2">
+            <el-tag v-if="record.status === 'PENDING'" type="warning" effect="dark">待教务处审核</el-tag>
             <el-button type="primary" plain size="small" @click="exportTranscriptPdf">导出 PDF 成绩单</el-button>
             <el-button size="small" @click="openVerifyFromQrLink">新窗口打开验真页</el-button>
           </div>

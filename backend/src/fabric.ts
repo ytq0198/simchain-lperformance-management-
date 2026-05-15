@@ -144,3 +144,34 @@ export async function closeFabric(): Promise<void> {
 export function decodeResult(bytes: Uint8Array): string {
   return utf8Decoder.decode(bytes);
 }
+
+/** 按 Fabric Profile 拉取当前世界状态下成绩 JSON 文本（用于双读一致性比对等） */
+export async function evaluateGetScoreJson(
+  profile: FabricProfile,
+  studentId: string,
+  courseId: string,
+  semester: string,
+): Promise<string> {
+  const contract = await getScoreContract(profile);
+  const bytes = await contract.evaluateTransaction('GetScore', studentId, courseId, semester);
+  return decodeResult(bytes);
+}
+
+/** 演示用：返回签名证书 PEM 前几行（不含私钥） */
+export async function getSignCertPemPreview(profile: FabricProfile): Promise<{
+  mspId: string;
+  certPath: string;
+  pemPreview: string;
+}> {
+  const org1Base = path.resolve(env('FABRIC_CRYPTO_BASE'));
+  const cryptoPath = profile === 'org1' ? org1Base : deriveOrg2CryptoBase(org1Base);
+  const mspId = profile === 'org1' ? env('MSP_ID', 'Org1MSP') : env('MSP_ID_ORG2', 'Org2MSP');
+  const certPath = await resolveSignCertPath(cryptoPath, profile);
+  const pem = await fs.readFile(certPath, 'utf8');
+  const lines = pem.split(/\r?\n/).filter(Boolean).slice(0, 6);
+  return {
+    mspId,
+    certPath,
+    pemPreview: `${lines.join('\n')}\n…（已截断；私钥在 keystore，勿导出到浏览器）`,
+  };
+}

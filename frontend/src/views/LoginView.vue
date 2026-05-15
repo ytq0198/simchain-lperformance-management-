@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { fetchHealth } from '../api/score';
 import { login } from '../stores/auth';
+import LoginHexBackground from '../components/decorative/LoginHexBackground.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -44,19 +45,20 @@ async function onSubmit() {
 
 <template>
   <div
-    class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#070b14] px-4 py-12 text-slate-200"
+    class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_center,#1a1c2c_0%,#0d0e17_100%)] px-4 py-12 text-slate-200"
   >
+    <LoginHexBackground />
     <div
-      class="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(34,211,238,0.12),_transparent_55%),radial-gradient(ellipse_at_bottom,_rgba(99,102,241,0.08),_transparent_50%)]"
+      class="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_top,_rgba(34,211,238,0.12),_transparent_55%),radial-gradient(ellipse_at_bottom,_rgba(99,102,241,0.12),_transparent_50%)]"
     />
     <div
-      class="pointer-events-none absolute -left-24 top-1/4 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl"
+      class="pointer-events-none absolute -left-24 top-1/4 z-[1] h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl"
     />
     <div
-      class="pointer-events-none absolute -right-20 bottom-1/4 h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl"
+      class="pointer-events-none absolute -right-20 bottom-1/4 z-[1] h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl"
     />
 
-    <div class="relative w-full max-w-md">
+    <div class="relative z-10 w-full max-w-md">
       <div class="mb-8 text-center">
         <div class="text-xs font-medium uppercase tracking-[0.35em] text-cyan-400/90">Hyperledger Fabric</div>
         <h1 class="mt-2 text-2xl font-semibold tracking-tight text-white">成绩链上存证</h1>
@@ -67,7 +69,7 @@ async function onSubmit() {
       </div>
 
       <div
-        class="rounded-2xl border border-cyan-500/15 bg-slate-950/70 p-8 shadow-2xl shadow-black/40 backdrop-blur-md"
+        class="rounded-2xl border border-cyan-500/15 bg-slate-950/55 p-8 shadow-2xl shadow-black/40 backdrop-blur-xl"
       >
         <el-form :model="form" label-position="top" class="space-y-1" @submit.prevent="onSubmit">
           <el-form-item label="用户名">
@@ -87,6 +89,11 @@ async function onSubmit() {
             登录
           </el-button>
         </el-form>
+
+        <p class="mt-5 text-center text-sm text-slate-500">
+          需要新身份？
+          <RouterLink to="/register" class="font-medium text-cyan-400/95 hover:text-cyan-300">去注册（演示 CA）</RouterLink>
+        </p>
 
         <div class="mt-6 rounded-lg border border-slate-700/50 bg-slate-900/50 p-3 text-[11px] leading-relaxed text-slate-500">
           <div class="mb-1 font-medium text-slate-400">演示账号（密码均为 demo）</div>

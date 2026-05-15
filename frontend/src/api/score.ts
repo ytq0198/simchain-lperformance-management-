@@ -75,8 +75,102 @@ export async function postScore(body: {
   courseId: string;
   semester: string;
   score: number;
-}): Promise<{ ok: boolean; transactionId: string }> {
+}): Promise<{ ok: boolean; transactionId: string; actor?: string }> {
   const { data } = await api.post('/api/scores', body);
+  return data;
+}
+
+export async function postApproveScore(body: {
+  studentId: string;
+  courseId: string;
+  semester: string;
+}): Promise<{ ok: boolean; transactionId: string }> {
+  const { data } = await api.post('/api/scores/approve', body);
+  return data;
+}
+
+export interface TxInsightResponse {
+  txId: string;
+  timestampUnix: number;
+  worldStateKey: string;
+  narrative: {
+    summary: string;
+    readSet: Array<{ key: string; valueBefore: unknown }>;
+    writeSet: Array<{ key: string; valueAfter: unknown }>;
+  };
+  previous: unknown;
+  current: unknown;
+}
+
+export async function fetchTxInsight(params: {
+  studentId: string;
+  courseId: string;
+  semester: string;
+  txId: string;
+}): Promise<TxInsightResponse> {
+  const { data } = await api.get<TxInsightResponse>('/api/scores/tx-insight', { params });
+  return data;
+}
+
+export async function fetchIntegrityScoreRead(params: {
+  studentId: string;
+  courseId: string;
+  semester: string;
+}): Promise<{ ok: boolean; message: string; org1Json: unknown; org2Json: unknown }> {
+  const { data } = await api.get('/api/integrity/score-read', { params });
+  return data;
+}
+
+export interface AppealListItem {
+  compositeKey: string;
+  appeal: {
+    studentId: string;
+    courseId: string;
+    semester: string;
+    reason: string;
+    status: string;
+    resolution?: string;
+    createdAt: number;
+    resolvedAt?: number;
+  };
+}
+
+export async function fetchOpenAppeals(): Promise<AppealListItem[]> {
+  const { data } = await api.get<AppealListItem[]>('/api/appeals/open');
+  return data;
+}
+
+export async function fetchMyAppeals(studentId: string): Promise<AppealListItem[]> {
+  const { data } = await api.get<AppealListItem[]>('/api/appeals/mine', { params: { studentId } });
+  return data;
+}
+
+export async function postAppeal(body: {
+  studentId: string;
+  courseId: string;
+  semester: string;
+  reason: string;
+}): Promise<{ ok: boolean; transactionId: string }> {
+  const { data } = await api.post('/api/appeals', body);
+  return data;
+}
+
+export async function postResolveAppeal(body: {
+  compositeKey: string;
+  resolution: string;
+}): Promise<{ ok: boolean; transactionId: string }> {
+  const { data } = await api.post('/api/appeals/resolve', body);
+  return data;
+}
+
+export async function fetchFabricIdentity(): Promise<{
+  profile: string;
+  mspId: string;
+  certPath: string;
+  pemPreview: string;
+  note: string;
+}> {
+  const { data } = await api.get('/api/auth/fabric-identity');
   return data;
 }
 

@@ -13,6 +13,12 @@ const router = createRouter({
       meta: { title: '登录', public: true },
     },
     {
+      path: '/register',
+      name: 'register',
+      component: () => import('../views/RegisterView.vue'),
+      meta: { title: '身份注册', public: true },
+    },
+    {
       path: '/forbidden',
       name: 'forbidden',
       component: () => import('../views/ForbiddenView.vue'),
@@ -80,6 +86,36 @@ const router = createRouter({
       },
     },
     {
+      path: '/scores/approve',
+      name: 'scores-approve',
+      component: () => import('../views/ScoreApproveView.vue'),
+      meta: {
+        title: '成绩审核',
+        roles: ['Academic_Affairs'],
+      },
+    },
+    {
+      path: '/appeals',
+      name: 'appeals',
+      component: () => import('../views/StudentAppealsView.vue'),
+      meta: { title: '成绩申诉', roles: ['Student'] },
+    },
+    {
+      path: '/appeals/inbox',
+      name: 'appeals-inbox',
+      component: () => import('../views/AppealsInboxView.vue'),
+      meta: {
+        title: '申诉处理',
+        roles: ['Academic_Affairs', 'DepartmentTeacher'],
+      },
+    },
+    {
+      path: '/fabric-identity',
+      name: 'fabric-identity',
+      component: () => import('../views/FabricIdentityView.vue'),
+      meta: { title: '链上身份' },
+    },
+    {
       path: '/verify',
       name: 'verify',
       component: () => import('../views/VerifyView.vue'),
@@ -90,7 +126,7 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.meta.public) {
-    if (authToken.value && to.path === '/login') {
+    if (authToken.value && (to.path === '/login' || to.path === '/register')) {
       return { path: '/dashboard' };
     }
     return true;

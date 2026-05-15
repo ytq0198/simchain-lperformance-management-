@@ -34,6 +34,26 @@ export async function apiLogin(username: string, password: string) {
   });
 }
 
+export async function apiRegister(input: {
+  username: string;
+  password: string;
+  displayName: string;
+  role: AppRole;
+  inviteCode?: string;
+}) {
+  const r = await fetch(`${apiBase()}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const body = (await r.json().catch(() => ({}))) as { error?: string; message?: string };
+  if (!r.ok) {
+    const msg = typeof body.error === 'string' ? body.error : r.statusText;
+    throw new Error(msg || `HTTP ${r.status}`);
+  }
+  return body as { message: string };
+}
+
 export async function apiMe(token: string) {
   return jsonFetch<AuthUser & { fabricProfile: string }>('/api/auth/me', {
     headers: { Authorization: `Bearer ${token}` },

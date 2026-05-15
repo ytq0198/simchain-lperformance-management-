@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus';
 import { postScore } from '../api/score';
 import { useFabricSubmitFlow } from '../composables/useFabricSubmitFlow';
 import { courseIdRules, semesterRules, studentIdRules } from '../utils/validators';
+import ShieldLockSeal from '../components/decorative/ShieldLockSeal.vue';
 
 const formRef = ref<FormInstance>();
 const form = reactive({
@@ -32,6 +33,7 @@ const rules: FormRules = {
 
 const loading = ref(false);
 const lastTx = ref('');
+const lastActor = ref<string | undefined>(undefined);
 const { stepLabel, run } = useFabricSubmitFlow();
 
 async function onSubmit() {
@@ -39,6 +41,7 @@ async function onSubmit() {
   await formRef.value.validate();
   loading.value = true;
   lastTx.value = '';
+  lastActor.value = undefined;
   try {
     const res = await run(() =>
       postScore({
@@ -49,6 +52,7 @@ async function onSubmit() {
       }),
     );
     lastTx.value = res.transactionId;
+    lastActor.value = res.actor;
     ElMessage.success('已提交上链');
   } finally {
     loading.value = false;
@@ -65,6 +69,9 @@ async function onSubmit() {
       </p>
     </div>
 
+    <div class="relative max-w-xl">
+      <ShieldLockSeal :sealing="loading" :locked="!!lastTx" />
+
     <el-alert
       v-if="stepLabel"
       type="info"
@@ -76,6 +83,15 @@ async function onSubmit() {
         <el-progress :percentage="66" :indeterminate="true" :stroke-width="4" />
       </template>
     </el-alert>
+
+    <el-alert
+      v-if="lastTx && lastActor === 'TEACHER'"
+      type="warning"
+      :closable="false"
+      class="max-w-xl border border-amber-500/25 bg-amber-950/25"
+      title="教师录入：链上为 PENDING"
+      description="请教务处账号在「成绩审核」页对该键执行审核通过后，成绩方变为 ACTIVE。"
+    />
 
     <el-form ref="formRef" :model="form" :rules="rules" label-width="100px" class="form max-w-xl">
       <el-form-item label="学号" prop="studentId">
@@ -109,6 +125,7 @@ async function onSubmit() {
         </template>
       </el-alert>
     </transition>
+    </div>
   </div>
 </template>
 

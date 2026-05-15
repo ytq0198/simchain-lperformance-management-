@@ -22,6 +22,22 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
 }
 
+/** EventSource 无法自定义 Header 时，允许 `?token=`（仅用于演示内网） */
+export function requireAuthSse(req: Request, res: Response, next: NextFunction): void {
+  const q = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  const raw = bearerToken(req) || q || null;
+  if (!raw) {
+    res.status(401).json({ error: '未登录：请在 Header 带 Bearer，或查询参数 token=' });
+    return;
+  }
+  try {
+    req.auth = verifyAuthToken(raw);
+    next();
+  } catch {
+    res.status(401).json({ error: '登录已过期或令牌无效' });
+  }
+}
+
 export function requireRoles(...roles: AppRole[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.auth) {
