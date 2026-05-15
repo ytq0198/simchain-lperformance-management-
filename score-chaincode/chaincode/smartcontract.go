@@ -59,6 +59,23 @@ func operatorMSP(ctx contractapi.TransactionContextInterface) string {
 	return msp
 }
 
+// assertOrg1Mutate ABAC：敏感写操作仅 Org1MSP；若证书含 Fabric CA 登记的 abac.role=student|verifier 亦拒绝（双保险）
+func assertOrg1Mutate(ctx contractapi.TransactionContextInterface) error {
+	msp, err := cid.GetMSPID(ctx.GetStub())
+	if err != nil {
+		return fmt.Errorf("ABAC: 读取 MSP 失败: %w", err)
+	}
+	if msp != "Org1MSP" {
+		return fmt.Errorf("ABAC: 成绩写入仅允许 Org1MSP 背书，当前 MSP=%s（学生/用人单位使用 Org2 Gateway 时链码在此拒绝）", msp)
+	}
+	if role, found, err := cid.GetAttributeValue(ctx.GetStub(), "abac.role"); err != nil {
+		return err
+	} else if found && (role == "student" || role == "verifier") {
+		return fmt.Errorf("ABAC: 身份属性 abac.role=%s 禁止写入成绩", role)
+	}
+	return nil
+}
+
 func txUnixSeconds(ctx contractapi.TransactionContextInterface) int64 {
 	ts, err := ctx.GetStub().GetTxTimestamp()
 	if err != nil || ts == nil {
@@ -99,6 +116,9 @@ func putScoreRecord(ctx contractapi.TransactionContextInterface, key string, rec
 
 // PutScore 写入或覆盖一条成绩（兼容旧 CLI：Args 后四位为学号、课程、学期、分数）
 func (s *SmartContract) PutScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, scoreStr string) error {
+	if err := assertOrg1Mutate(ctx); err != nil {
+		return err
+	}
 	score, err := strconv.Atoi(scoreStr)
 	if err != nil {
 		return fmt.Errorf("invalid score: %w", err)
@@ -119,6 +139,9 @@ func (s *SmartContract) PutScore(ctx contractapi.TransactionContextInterface, st
 
 // CorrectScore 更正分数（逻辑上仍为同一条业务记录；链下可通过 GetScoreHistory 看版本）
 func (s *SmartContract) CorrectScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, newScoreStr, remark string) error {
+	if err := assertOrg1Mutate(ctx); err != nil {
+		return err
+	}
 	score, err := strconv.Atoi(newScoreStr)
 	if err != nil {
 		return fmt.Errorf("invalid score: %w", err)
@@ -144,6 +167,9 @@ func (s *SmartContract) CorrectScore(ctx contractapi.TransactionContextInterface
 
 // RevokeScore 作废（不删键；世界状态仍保留一条 REVOKED 记录，历史可查）
 func (s *SmartContract) RevokeScore(ctx contractapi.TransactionContextInterface, studentID, courseID, semester, remark string) error {
+	if err := assertOrg1Mutate(ctx); err != nil {
+		return err
+	}
 	key := makeKey(studentID, courseID, semester)
 	cur, err := readScore(ctx, key)
 	if err != nil {

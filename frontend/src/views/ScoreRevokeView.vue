@@ -3,6 +3,8 @@ import { reactive, ref } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { postRevoke } from '../api/score';
+import { useFabricSubmitFlow } from '../composables/useFabricSubmitFlow';
+import { courseIdRules, semesterRules, studentIdRules } from '../utils/validators';
 
 const formRef = ref<FormInstance>();
 const form = reactive({
@@ -13,14 +15,15 @@ const form = reactive({
 });
 
 const rules: FormRules = {
-  studentId: [{ required: true, message: '请输入学号', trigger: 'blur' }],
-  courseId: [{ required: true, message: '请输入课程代码', trigger: 'blur' }],
-  semester: [{ required: true, message: '请输入学期', trigger: 'blur' }],
+  studentId: studentIdRules,
+  courseId: courseIdRules,
+  semester: semesterRules,
   remark: [{ required: true, message: '请输入作废说明', trigger: 'blur' }],
 };
 
 const loading = ref(false);
 const lastTx = ref('');
+const { stepLabel, run } = useFabricSubmitFlow();
 
 async function onSubmit() {
   if (!formRef.value) return;
@@ -35,12 +38,14 @@ async function onSubmit() {
   loading.value = true;
   lastTx.value = '';
   try {
-    const res = await postRevoke({
-      studentId: form.studentId,
-      courseId: form.courseId,
-      semester: form.semester,
-      remark: form.remark,
-    });
+    const res = await run(() =>
+      postRevoke({
+        studentId: form.studentId,
+        courseId: form.courseId,
+        semester: form.semester,
+        remark: form.remark,
+      }),
+    );
     lastTx.value = res.transactionId;
     ElMessage.success('作废已上链');
   } finally {
@@ -55,6 +60,19 @@ async function onSubmit() {
       <h1 class="text-xl font-semibold text-white sm:text-2xl">成绩作废</h1>
       <p class="mt-1 text-sm text-slate-400">逻辑删除：状态变更为 REVOKED，历史仍可溯源。</p>
     </div>
+
+    <el-alert
+      v-if="stepLabel"
+      type="info"
+      :closable="false"
+      class="max-w-xl border border-cyan-500/25 bg-cyan-950/30"
+      :title="stepLabel"
+    >
+      <template #default>
+        <el-progress :percentage="66" :indeterminate="true" :stroke-width="4" />
+      </template>
+    </el-alert>
+
     <el-form ref="formRef" :model="form" :rules="rules" label-width="100px" class="form max-w-xl">
       <el-form-item label="学号" prop="studentId">
         <el-input v-model="form.studentId" clearable />

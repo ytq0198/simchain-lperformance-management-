@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useClipboard } from '@vueuse/core';
 import { ElMessage } from 'element-plus';
-import { fetchHistory, type HistoryEntry } from '../api/score';
+import { fetchHistory, type HistoryEntry, type ScoreRecord } from '../api/score';
 import { formatUnixSeconds } from '../utils/format';
 
 const route = useRoute();
@@ -19,6 +19,7 @@ const list = ref<HistoryEntry[]>([]);
 
 const dialogVisible = ref(false);
 const selected = ref<HistoryEntry | null>(null);
+const selectedIndex = ref(-1);
 
 /** API 返回为「新版本在前」；时间轴按时间正序展示 */
 const chronological = computed(() => [...list.value].reverse());
@@ -39,6 +40,60 @@ function eventLabel(entry: HistoryEntry, idx: number, total: number): string {
   return '链上状态变更';
 }
 
+/** 节点配色：绿=初始、蓝=更正、红=作废 */
+function nodeKind(entry: HistoryEntry, idx: number): 'initial' | 'correct' | 'revoke' | 'other' {
+  if (entry.record.status === 'REVOKED') return 'revoke';
+  const r = entry.record.remark || '';
+  if (r.includes('更正')) return 'correct';
+  if (idx === 0) return 'initial';
+  return 'other';
+}
+
+const nodeRing = {
+  initial: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.25)]',
+  correct: 'border-sky-500/60 bg-sky-500/15 text-sky-100 shadow-[0_0_14px_rgba(56,189,248,0.2)]',
+  revoke: 'border-rose-500/60 bg-rose-500/15 text-rose-100 shadow-[0_0_14px_rgba(244,63,94,0.22)]',
+  other: 'border-cyan-400/50 bg-slate-900 text-cyan-200 shadow-[0_0_12px_rgba(34,211,238,0.2)]',
+};
+
+const cardBorder = {
+  initial: 'hover:border-emerald-500/40',
+  correct: 'hover:border-sky-500/40',
+  revoke: 'hover:border-rose-500/40',
+  other: 'hover:border-cyan-500/35',
+};
+
+const prevRecord = computed<ScoreRecord | null>(() => {
+  if (!selected.value || selectedIndex.value <= 0) return null;
+  return chronological.value[selectedIndex.value - 1]?.record ?? null;
+});
+
+type DiffField = { key: string; label: string; before: string; after: string; changed: boolean };
+
+const diffRows = computed<DiffField[]>(() => {
+  if (!selected.value) return [];
+  const cur = selected.value.record;
+  const prev = prevRecord.value;
+  const keys: { key: keyof ScoreRecord; label: string }[] = [
+    { key: 'score', label: '分数' },
+    { key: 'status', label: '状态' },
+    { key: 'remark', label: '备注' },
+    { key: 'operator', label: '操作者' },
+    { key: 'updatedAt', label: '更新时间' },
+  ];
+  return keys.map(({ key, label }) => {
+    const after =
+      key === 'updatedAt' ? formatUnixSeconds(cur.updatedAt) : String(cur[key] ?? '—');
+    const before = prev
+      ? key === 'updatedAt'
+        ? formatUnixSeconds(prev.updatedAt)
+        : String(prev[key] ?? '—')
+      : '—（首版无上一版本）';
+    const changed = prev != null && before !== after;
+    return { key, label, before, after, changed };
+  });
+});
+
 async function load() {
   if (!form.studentId || !form.courseId || !form.semester) {
     list.value = [];
@@ -54,6 +109,7 @@ async function load() {
 
 function openDetail(row: HistoryEntry) {
   selected.value = row;
+  selectedIndex.value = chronological.value.findIndex((e) => e.txId === row.txId);
   dialogVisible.value = true;
 }
 
@@ -81,8 +137,7 @@ watch(
     <div>
       <h1 class="text-xl font-semibold text-white sm:text-2xl">成绩全生命周期溯源</h1>
       <p class="mt-1 max-w-3xl text-sm text-slate-400">
-        垂直时间轴展示同一复合键下的版本演进，体现「不可篡改、可追溯」。点击节点查看
-        <strong class="text-cyan-200/90">Transaction ID</strong> 与原始 JSON。
+        时间轴按版本上色；点击节点打开<strong class="text-cyan-200/90">左右 Diff</strong>（若有上一版本）及原始 JSON。
       </p>
     </div>
 
@@ -93,10 +148,28 @@ watch(
       <el-button type="primary" :loading="loading" @click="load">加载链上历史</el-button>
     </div>
 
-    <el-empty
+    <div
       v-if="!loading && chronological.length === 0"
-      description="请输入完整学号 / 课程 / 学期后加载"
-    />
+      class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-600/80 bg-slate-950/30 py-16 text-center"
+    >
+      <svg class="mb-6 h-36 w-64 text-cyan-500/40" viewBox="0 0 240 120" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="beam" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#22d3ee" stop-opacity="0" />
+            <stop offset="45%" stop-color="#22d3ee" stop-opacity="0.45" />
+            <stop offset="100%" stop-color="#22d3ee" stop-opacity="0" />
+          </linearGradient>
+        </defs>
+        <rect x="70" y="28" width="100" height="64" rx="10" fill="rgba(15,23,42,0.9)" stroke="currentColor" />
+        <rect x="108" y="48" width="24" height="24" rx="4" fill="rgba(34,211,238,0.15)" stroke="#22d3ee" />
+        <path d="M120 12 L120 28" stroke="url(#beam)" stroke-width="28" />
+        <circle cx="120" cy="18" r="3" fill="#67e8f9" />
+      </svg>
+      <p class="text-sm font-medium text-slate-300">等待链上键入查询</p>
+      <p class="mt-2 max-w-md text-xs text-slate-500">
+        请输入学号、课程代码与学期后点击「加载链上历史」，将拉取 <code class="text-cyan-600/90">GetScoreHistory</code> 并渲染版本时间轴。
+      </p>
+    </div>
 
     <div v-else class="relative pl-2">
       <div class="absolute bottom-0 left-[11px] top-2 w-px bg-gradient-to-b from-cyan-500/50 via-slate-600 to-transparent" />
@@ -106,12 +179,14 @@ watch(
         class="relative mb-8 flex gap-4 pl-8 last:mb-0"
       >
         <div
-          class="absolute left-0 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-cyan-400/50 bg-slate-900 text-[10px] font-bold text-cyan-200 shadow-[0_0_12px_rgba(34,211,238,0.35)]"
+          class="absolute left-0 top-1 flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-bold"
+          :class="nodeRing[nodeKind(item, idx)]"
         >
           {{ idx + 1 }}
         </div>
         <div
-          class="flex-1 cursor-pointer rounded-xl border border-slate-700/60 bg-slate-950/50 p-4 transition hover:border-cyan-500/35 hover:shadow-glow"
+          class="flex-1 cursor-pointer rounded-xl border border-slate-700/60 bg-slate-950/50 p-4 transition hover:shadow-glow"
+          :class="cardBorder[nodeKind(item, idx)]"
           role="button"
           tabindex="0"
           @click="openDetail(item)"
@@ -128,16 +203,14 @@ watch(
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <span
-                class="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-              >
+              <span class="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300">
                 分数 {{ item.record.score }} · {{ item.record.status }}
               </span>
               <el-button size="small" @click.stop="copyTx(item.txId)">复制 TxID</el-button>
             </div>
           </div>
           <p class="mt-2 line-clamp-2 text-xs text-slate-500">
-            {{ item.record.remark || '（无备注）' }} · 点击卡片查看完整 JSON
+            {{ item.record.remark || '（无备注）' }} · 点击查看 Diff
           </p>
           <code class="mt-2 block truncate font-mono text-[11px] text-cyan-100/80">{{ item.txId }}</code>
         </div>
@@ -146,19 +219,49 @@ watch(
 
     <el-dialog
       v-model="dialogVisible"
-      title="版本详情 · 链上原始数据"
-      width="min(720px, 96vw)"
+      title="版本对比 · 链上详情"
+      width="min(880px, 96vw)"
       class="history-dialog"
       destroy-on-close
     >
       <template v-if="selected">
-        <div class="mb-3 flex flex-wrap items-center gap-2">
+        <div class="mb-4 flex flex-wrap items-center gap-2">
           <el-tag type="info">TxID</el-tag>
           <code class="break-all text-xs text-cyan-100/90">{{ selected.txId }}</code>
           <el-button size="small" type="primary" @click="copyTx(selected.txId)">复制</el-button>
         </div>
+
+        <div v-if="prevRecord" class="mb-4 space-y-2">
+          <div class="grid grid-cols-2 gap-2 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
+            <span class="rounded bg-rose-950/40 py-1 text-rose-200/90">修改前</span>
+            <span class="rounded bg-emerald-950/40 py-1 text-emerald-200/90">修改后</span>
+          </div>
+          <div
+            v-for="row in diffRows"
+            :key="row.key"
+            class="grid grid-cols-2 gap-2 font-mono text-xs"
+          >
+            <div
+              class="rounded border px-2 py-2"
+              :class="row.changed ? 'border-rose-500/35 bg-rose-950/30 text-rose-50' : 'border-slate-700/50 text-slate-400'"
+            >
+              <span class="text-slate-500">{{ row.label }}：</span>{{ row.before }}
+            </div>
+            <div
+              class="rounded border px-2 py-2"
+              :class="row.changed ? 'border-emerald-500/35 bg-emerald-950/30 text-emerald-50' : 'border-slate-700/50 text-slate-400'"
+            >
+              <span class="text-slate-500">{{ row.label }}：</span>{{ row.after }}
+            </div>
+          </div>
+        </div>
+        <div v-else class="mb-4 rounded-lg border border-slate-600/50 bg-slate-900/50 p-3 text-xs text-slate-400">
+          链上最早版本，无「上一版本」可对比；下方为完整 JSON。
+        </div>
+
+        <div class="text-xs font-medium text-slate-400">原始 JSON</div>
         <pre
-          class="max-h-[55vh] overflow-auto rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs leading-relaxed text-emerald-100/90"
+          class="mt-1 max-h-[40vh] overflow-auto rounded-lg border border-slate-700 bg-slate-950 p-3 text-xs leading-relaxed text-emerald-100/90"
         >{{ JSON.stringify(selected, null, 2) }}</pre>
       </template>
     </el-dialog>

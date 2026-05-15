@@ -3,6 +3,8 @@ import { reactive, ref } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { postCorrect } from '../api/score';
+import { useFabricSubmitFlow } from '../composables/useFabricSubmitFlow';
+import { courseIdRules, semesterRules, studentIdRules } from '../utils/validators';
 
 const formRef = ref<FormInstance>();
 const form = reactive({
@@ -14,9 +16,9 @@ const form = reactive({
 });
 
 const rules: FormRules = {
-  studentId: [{ required: true, message: '请输入学号', trigger: 'blur' }],
-  courseId: [{ required: true, message: '请输入课程代码', trigger: 'blur' }],
-  semester: [{ required: true, message: '请输入学期', trigger: 'blur' }],
+  studentId: studentIdRules,
+  courseId: courseIdRules,
+  semester: semesterRules,
   score: [
     { required: true, message: '请输入分数', trigger: 'blur' },
     {
@@ -32,6 +34,7 @@ const rules: FormRules = {
 
 const loading = ref(false);
 const lastTx = ref('');
+const { stepLabel, run } = useFabricSubmitFlow();
 
 async function onSubmit() {
   if (!formRef.value) return;
@@ -39,13 +42,15 @@ async function onSubmit() {
   loading.value = true;
   lastTx.value = '';
   try {
-    const res = await postCorrect({
-      studentId: form.studentId,
-      courseId: form.courseId,
-      semester: form.semester,
-      score: Number(form.score),
-      remark: form.remark,
-    });
+    const res = await run(() =>
+      postCorrect({
+        studentId: form.studentId,
+        courseId: form.courseId,
+        semester: form.semester,
+        score: Number(form.score),
+        remark: form.remark,
+      }),
+    );
     lastTx.value = res.transactionId;
     ElMessage.success('更正已上链');
   } finally {
@@ -60,6 +65,19 @@ async function onSubmit() {
       <h1 class="text-xl font-semibold text-white sm:text-2xl">成绩更正</h1>
       <p class="mt-1 text-sm text-slate-400">链上状态机产生新版本；请填写更正说明以便审计。</p>
     </div>
+
+    <el-alert
+      v-if="stepLabel"
+      type="info"
+      :closable="false"
+      class="max-w-xl border border-cyan-500/25 bg-cyan-950/30"
+      :title="stepLabel"
+    >
+      <template #default>
+        <el-progress :percentage="66" :indeterminate="true" :stroke-width="4" />
+      </template>
+    </el-alert>
+
     <el-form ref="formRef" :model="form" :rules="rules" label-width="100px" class="form max-w-xl">
       <el-form-item label="学号" prop="studentId">
         <el-input v-model="form.studentId" clearable />

@@ -3,6 +3,8 @@ import { reactive, ref } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { postScore } from '../api/score';
+import { useFabricSubmitFlow } from '../composables/useFabricSubmitFlow';
+import { courseIdRules, semesterRules, studentIdRules } from '../utils/validators';
 
 const formRef = ref<FormInstance>();
 const form = reactive({
@@ -13,9 +15,9 @@ const form = reactive({
 });
 
 const rules: FormRules = {
-  studentId: [{ required: true, message: '请输入学号', trigger: 'blur' }],
-  courseId: [{ required: true, message: '请输入课程代码', trigger: 'blur' }],
-  semester: [{ required: true, message: '请输入学期', trigger: 'blur' }],
+  studentId: studentIdRules,
+  courseId: courseIdRules,
+  semester: semesterRules,
   score: [
     { required: true, message: '请输入分数', trigger: 'blur' },
     {
@@ -30,6 +32,7 @@ const rules: FormRules = {
 
 const loading = ref(false);
 const lastTx = ref('');
+const { stepLabel, run } = useFabricSubmitFlow();
 
 async function onSubmit() {
   if (!formRef.value) return;
@@ -37,12 +40,14 @@ async function onSubmit() {
   loading.value = true;
   lastTx.value = '';
   try {
-    const res = await postScore({
-      studentId: form.studentId,
-      courseId: form.courseId,
-      semester: form.semester,
-      score: Number(form.score),
-    });
+    const res = await run(() =>
+      postScore({
+        studentId: form.studentId,
+        courseId: form.courseId,
+        semester: form.semester,
+        score: Number(form.score),
+      }),
+    );
     lastTx.value = res.transactionId;
     ElMessage.success('已提交上链');
   } finally {
@@ -55,11 +60,26 @@ async function onSubmit() {
   <div class="space-y-6">
     <div>
       <h1 class="text-xl font-semibold text-white sm:text-2xl">录入上链</h1>
-      <p class="mt-1 text-sm text-slate-400">提交后由 Orderer 排序、Peer 背书落账；顶部进度条反映网络往返。</p>
+      <p class="mt-1 text-sm text-slate-400">
+        提交后由 Peer 背书、Orderer 排序、区块落账；下方展示与 Fabric 流程对齐的阶段性说明。
+      </p>
     </div>
+
+    <el-alert
+      v-if="stepLabel"
+      type="info"
+      :closable="false"
+      class="max-w-xl border border-cyan-500/25 bg-cyan-950/30"
+      :title="stepLabel"
+    >
+      <template #default>
+        <el-progress :percentage="66" :indeterminate="true" :stroke-width="4" />
+      </template>
+    </el-alert>
+
     <el-form ref="formRef" :model="form" :rules="rules" label-width="100px" class="form max-w-xl">
       <el-form-item label="学号" prop="studentId">
-        <el-input v-model="form.studentId" clearable />
+        <el-input v-model="form.studentId" clearable placeholder="4～24 位字母数字" />
       </el-form-item>
       <el-form-item label="课程代码" prop="courseId">
         <el-input v-model="form.courseId" clearable />

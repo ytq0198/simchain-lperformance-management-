@@ -1,29 +1,141 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
 import QRCode from 'qrcode';
 import { postVerify, type VerifyResponse } from '../api/score';
+import { isExternalVerifier } from '../stores/auth';
+import { courseIdRules, semesterRules, studentIdRules } from '../utils/validators';
 
+const route = useRoute();
 const formRef = ref<FormInstance>();
 const form = reactive({
   studentId: '',
   courseId: '',
   semester: '',
   claimedScore: 0,
+  /** 扫码带入：仅用于展示与二维码载荷，链上核验仍以 claimedScore 为准 */
+  txId: '',
   /** 演示：可粘贴预计算指纹，未来可对接后端比对 */
   fingerprint: '',
 });
 
 const rules: FormRules = {
-  studentId: [{ required: true, message: '请输入学号', trigger: 'blur' }],
-  courseId: [{ required: true, message: '请输入课程代码', trigger: 'blur' }],
-  semester: [{ required: true, message: '请输入学期', trigger: 'blur' }],
-  claimedScore: [{ required: true, message: '请输入声称分数', trigger: 'blur' }],
+  studentId: studentIdRules,
+  courseId: courseIdRules,
+  semester: semesterRules,
+  claimedScore: [
+    { required: true, message: '请输入声称分数', trigger: 'blur' },
+    {
+      validator: (_r, v: number, cb) => {
+        if (v < 0 || v > 100) cb(new Error('分数须在 0～100'));
+        else cb();
+      },
+      trigger: 'blur',
+    },
+  ],
 };
 
 const loading = ref(false);
 const result = ref<VerifyResponse | null>(null);
 const qrSrc = ref('');
+/** 避免同一路由重复自动提交 */
+const autoSubmittedPath = ref('');
+
+const showVerifierToolbox = computed(() => isExternalVerifier());
+const batchText = ref(
+  '2021003,PHYS101,2024-3,88\nstudent01,MATH101,2024-1,60',
+);
+const batchRunning = ref(false);
+const batchRows = ref<{ line: number; studentId: string; match: boolean; reason: string }[]>([]);
+
+async function runBatchVerify() {
+  batchRows.value = [];
+  const lines = batchText.value
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return;
+  batchRunning.value = true;
+  try {
+    for (let i = 0; i < lines.length; i++) {
+      const parts = lines[i].split(/[,;\t]/).map((s) => s.trim());
+      if (parts.length < 4) {
+        batchRows.value.push({
+          line: i + 1,
+          studentId: '—',
+          match: false,
+          reason: '每行至少 4 列：学号,课程,学期,声称分数',
+        });
+        continue;
+      }
+      const [studentId, courseId, semester, claimedStr] = parts;
+      const claimedScore = Number(claimedStr);
+      if (Number.isNaN(claimedScore)) {
+        batchRows.value.push({ line: i + 1, studentId, match: false, reason: '声称分数不是数字' });
+        continue;
+      }
+      try {
+        const r = await postVerify({ studentId, courseId, semester, claimedScore });
+        batchRows.value.push({
+          line: i + 1,
+          studentId,
+          match: r.match,
+          reason: r.reason + (r.current != null ? `（链上 ${r.current}）` : ''),
+        });
+      } catch (e) {
+        batchRows.value.push({
+          line: i + 1,
+          studentId,
+          match: false,
+          reason: e instanceof Error ? e.message : '请求失败',
+        });
+      }
+    }
+  } finally {
+    batchRunning.value = false;
+  }
+}
+
+function qStr(v: unknown): string {
+  if (v == null) return '';
+  if (Array.isArray(v)) return String(v[0] ?? '');
+  return String(v);
+}
+
+function hydrateFromRoute() {
+  const q = route.query;
+  const sid = qStr(q.studentId);
+  const cid = qStr(q.courseId);
+  const sem = qStr(q.semester);
+  const tx = qStr(q.txId);
+  const fp = qStr(q.fingerprint);
+  if (sid) form.studentId = sid;
+  if (cid) form.courseId = cid;
+  if (sem) form.semester = sem;
+  if (tx) form.txId = tx;
+  if (fp) form.fingerprint = fp;
+  const cs = qStr(q.claimedScore);
+  if (cs !== '') {
+    const n = Number(cs);
+    if (!Number.isNaN(n)) form.claimedScore = n;
+  }
+}
+
+async function tryAutoSubmitFromQuery() {
+  if (qStr(route.query.auto) !== '1') return;
+  if (autoSubmittedPath.value === route.fullPath) return;
+  await nextTick();
+  if (!formRef.value) await nextTick();
+  if (!formRef.value) return;
+  try {
+    await formRef.value.validate();
+  } catch {
+    return;
+  }
+  autoSubmittedPath.value = route.fullPath;
+  await onSubmit();
+}
 
 async function refreshQr() {
   if (!result.value) {
@@ -36,6 +148,7 @@ async function refreshQr() {
     courseId: form.courseId,
     semester: form.semester,
     claimedScore: form.claimedScore,
+    txId: form.txId || undefined,
     match: result.value.match,
     reason: result.value.reason,
     chainScore: result.value.current ?? null,
@@ -54,10 +167,19 @@ async function refreshQr() {
 }
 
 watch(
-  () => [result.value, form.studentId, form.courseId, form.semester, form.claimedScore, form.fingerprint],
+  () => [result.value, form.studentId, form.courseId, form.semester, form.claimedScore, form.fingerprint, form.txId],
   () => {
     void refreshQr();
   },
+);
+
+watch(
+  () => route.fullPath,
+  () => {
+    hydrateFromRoute();
+    void tryAutoSubmitFromQuery();
+  },
+  { immediate: true },
 );
 
 async function onSubmit() {
@@ -84,7 +206,9 @@ async function onSubmit() {
       <h1 class="text-xl font-semibold text-white sm:text-2xl">成绩验证与链上凭证</h1>
       <p class="mt-1 max-w-3xl text-sm text-slate-400">
         调用 <code class="rounded bg-slate-800 px-1 py-0.5 text-cyan-200/90">POST /api/verify</code>
-        与链上规则比对；下方电子成绩单与二维码用于答辩「确权和防篡改」叙事（二维码载荷为前端 JSON，可扩展为后端签发 JWT / 哈希）。
+        与链上规则比对；支持通过查询参数
+        <code class="rounded bg-slate-800 px-1 py-0.5 text-slate-300">?studentId=&amp;courseId=&amp;semester=&amp;claimedScore=&amp;txId=&amp;auto=1</code>
+        从手机扫码回填并可选自动核验。
       </p>
     </div>
 
@@ -103,6 +227,9 @@ async function onSubmit() {
           </el-form-item>
           <el-form-item label="声称分数" prop="claimedScore">
             <el-input-number v-model="form.claimedScore" :min="0" :max="100" class="w-full" />
+          </el-form-item>
+          <el-form-item label="关联交易 ID（可选 · 扫码回填）">
+            <el-input v-model="form.txId" clearable placeholder="用于演示凭证与二维码载荷" />
           </el-form-item>
           <el-form-item label="成绩单指纹（可选 · 演示）">
             <el-input
@@ -169,6 +296,10 @@ async function onSubmit() {
             <div class="flex justify-between border-b border-slate-700/50 py-1">
               <span class="text-slate-500">学期</span><span>{{ form.semester }}</span>
             </div>
+            <div v-if="form.txId" class="flex justify-between border-b border-slate-700/50 py-1">
+              <span class="text-slate-500">交易 ID</span>
+              <span class="max-w-[60%] truncate text-right font-mono text-xs text-cyan-200/90">{{ form.txId }}</span>
+            </div>
             <div class="flex justify-between py-1">
               <span class="text-slate-500">核验声称分数</span>
               <span class="text-lg font-semibold text-white">{{ form.claimedScore }}</span>
@@ -184,6 +315,30 @@ async function onSubmit() {
           </p>
         </div>
       </div>
+    </div>
+
+    <div
+      v-if="showVerifierToolbox"
+      class="rounded-xl border border-amber-500/20 bg-slate-950/50 p-5 shadow-inner"
+    >
+      <h2 class="text-sm font-semibold text-amber-100/90">验证方工具箱 · 批量链上核验</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        每行一条，逗号或制表符分隔：<span class="font-mono text-slate-400">学号,课程代码,学期,声称分数</span>
+      </p>
+      <el-input v-model="batchText" type="textarea" :rows="6" class="mt-3 font-mono text-xs" />
+      <el-button type="warning" class="mt-3" plain :loading="batchRunning" @click="runBatchVerify">批量运行</el-button>
+      <ul v-if="batchRows.length" class="mt-4 max-h-56 space-y-1 overflow-y-auto text-xs">
+        <li
+          v-for="row in batchRows"
+          :key="row.line"
+          class="flex flex-wrap gap-2 rounded border border-slate-700/40 bg-slate-900/50 px-2 py-1.5"
+        >
+          <span class="text-slate-500">#{{ row.line }}</span>
+          <span class="font-mono text-slate-300">{{ row.studentId }}</span>
+          <span :class="row.match ? 'text-emerald-400' : 'text-rose-400'">{{ row.match ? 'MATCH' : 'FAIL' }}</span>
+          <span class="text-slate-400">{{ row.reason }}</span>
+        </li>
+      </ul>
     </div>
   </div>
 </template>

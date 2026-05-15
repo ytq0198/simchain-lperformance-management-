@@ -1,10 +1,23 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { canWriteScores } from '../stores/role';
+import type { AppRole } from '../api/authApi';
+import { authToken, authUser, canWriteScores, isExternalVerifier, isStudent } from '../stores/auth';
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+      meta: { title: '登录', public: true },
+    },
+    {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: () => import('../views/ForbiddenView.vue'),
+      meta: { title: '无权访问' },
+    },
     { path: '/', redirect: '/dashboard' },
     {
       path: '/dashboard',
@@ -31,22 +44,40 @@ const router = createRouter({
       meta: { title: '全链路溯源' },
     },
     {
+      path: '/my-certificates',
+      name: 'my-certificates',
+      component: () => import('../views/MyCertificatesView.vue'),
+      meta: { title: '我的证书', roles: ['Student'] },
+    },
+    {
       path: '/scores/new',
       name: 'scores-new',
       component: () => import('../views/ScoreNewView.vue'),
-      meta: { title: '录入上链', requiresWrite: true },
+      meta: {
+        title: '录入上链',
+        requiresWrite: true,
+        roles: ['Academic_Affairs', 'DepartmentTeacher'],
+      },
     },
     {
       path: '/scores/correct',
       name: 'scores-correct',
       component: () => import('../views/ScoreCorrectView.vue'),
-      meta: { title: '成绩更正', requiresWrite: true },
+      meta: {
+        title: '成绩更正',
+        requiresWrite: true,
+        roles: ['Academic_Affairs', 'DepartmentTeacher'],
+      },
     },
     {
       path: '/scores/revoke',
       name: 'scores-revoke',
       component: () => import('../views/ScoreRevokeView.vue'),
-      meta: { title: '成绩作废', requiresWrite: true },
+      meta: {
+        title: '成绩作废',
+        requiresWrite: true,
+        roles: ['Academic_Affairs', 'DepartmentTeacher'],
+      },
     },
     {
       path: '/verify',
@@ -58,10 +89,43 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  if (to.meta.requiresWrite && !canWriteScores()) {
-    ElMessage.warning('当前角色无写权限，请切换为教务处或教师');
+  if (to.meta.public) {
+    if (authToken.value && to.path === '/login') {
+      return { path: '/dashboard' };
+    }
+    return true;
+  }
+
+  if (!authToken.value) {
+    return { path: '/login', query: { redirect: to.fullPath } };
+  }
+
+  const role = authUser.value?.role;
+
+  if (isStudent() && to.path === '/explorer') {
+    return { path: '/dashboard' };
+  }
+
+  if (isExternalVerifier() && to.path !== '/verify' && to.path !== '/explorer' && to.path !== '/forbidden') {
+    return { path: '/verify', query: to.query };
+  }
+
+  if (isStudent() && to.path === '/verify') {
+    ElMessage.info('当前身份无验真入口，已跳转到成绩查询');
     return { path: '/scores' };
   }
+
+  const metaRoles = to.meta.roles as AppRole[] | undefined;
+  if (metaRoles?.length && role && !metaRoles.includes(role)) {
+    return { path: '/forbidden' };
+  }
+
+  if (to.meta.requiresWrite && !canWriteScores.value) {
+    ElMessage.warning('当前身份无链上写权限');
+    return { path: '/forbidden' };
+  }
+
+  return true;
 });
 
 router.afterEach((to) => {

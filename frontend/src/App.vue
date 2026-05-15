@@ -1,29 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useRoute, RouterLink } from 'vue-router';
-import { currentRole, type DemoRole } from './stores/role';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
+import { authUser, canWriteScores, clearAuth, roleLabel } from './stores/auth';
 
 const route = useRoute();
+const router = useRouter();
 
-const roleLabel: Record<DemoRole, string> = {
-  admin: '教务处',
-  teacher: '教师',
-  student: '学生',
-  third: '第三方',
-};
-
-const roleOptions: { value: DemoRole; label: string }[] = [
-  { value: 'admin', label: '教务处' },
-  { value: 'teacher', label: '教师' },
-  { value: 'student', label: '学生' },
-  { value: 'third', label: '第三方（用人单位验真）' },
-];
-
-const isThird = computed(() => currentRole.value === 'third');
-const isStudent = computed(() => currentRole.value === 'student');
-const canWrite = computed(
-  () => currentRole.value === 'admin' || currentRole.value === 'teacher',
-);
+const isPublicLogin = computed(() => route.meta.public === true);
 
 const breadcrumbs = computed(() =>
   route.matched
@@ -31,23 +14,49 @@ const breadcrumbs = computed(() =>
     .map((m) => String(m.meta.title)),
 );
 
+const canWrite = computed(() => canWriteScores.value);
+
 const nav = computed(() => {
-  const items: { to: string; label: string; show: boolean }[] = [
+  const r = authUser.value?.role;
+  if (!r) return [];
+  if (r === 'ExternalVerifier') {
+    return [
+      { to: '/verify', label: '验真与凭证', show: true },
+      { to: '/explorer', label: '链上浏览器', show: true },
+    ];
+  }
+  if (r === 'Student') {
+    return [
+      { to: '/dashboard', label: '综合看板', show: true },
+      { to: '/scores', label: '成绩查询', show: true },
+      { to: '/scores/history', label: '全链路溯源', show: true },
+      { to: '/my-certificates', label: '我的证书', show: true },
+    ];
+  }
+  return [
     { to: '/dashboard', label: '综合看板', show: true },
     { to: '/explorer', label: '链上浏览器', show: true },
-    { to: '/scores', label: '成绩查询', show: !isThird.value },
-    { to: '/scores/history', label: '全链路溯源', show: !isThird.value },
+    { to: '/scores', label: '成绩查询', show: true },
+    { to: '/scores/history', label: '全链路溯源', show: true },
     { to: '/scores/new', label: '录入上链', show: canWrite.value },
     { to: '/scores/correct', label: '成绩更正', show: canWrite.value },
     { to: '/scores/revoke', label: '成绩作废', show: canWrite.value },
-    { to: '/verify', label: '验真与凭证', show: !isStudent.value },
+    { to: '/verify', label: '验真与凭证', show: true },
   ];
-  return items.filter((i) => i.show);
 });
+
+function logout() {
+  clearAuth();
+  void router.replace({ path: '/login' });
+}
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-[#0b1220] text-slate-200">
+  <div v-if="isPublicLogin" class="min-h-screen">
+    <router-view />
+  </div>
+
+  <div v-else class="flex min-h-screen bg-[#0b1220] text-slate-200">
     <aside
       class="flex w-60 shrink-0 flex-col border-r border-cyan-500/10 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 shadow-[inset_-1px_0_0_rgba(34,211,238,0.06)]"
     >
@@ -55,7 +64,7 @@ const nav = computed(() => {
         <div class="text-xs font-medium uppercase tracking-[0.2em] text-cyan-400/90">Fabric Console</div>
         <div class="mt-1 text-lg font-semibold text-white">成绩链上存证</div>
         <div class="mt-2 text-[11px] leading-relaxed text-slate-500">
-          联盟链管理后台 · 将账本状态与交易语义可视化
+          JWT 权限分发 · Gateway 按角色加载 Org1 / Org2 钱包身份
         </div>
       </div>
       <nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
@@ -85,7 +94,7 @@ const nav = computed(() => {
         </RouterLink>
       </nav>
       <div class="border-t border-slate-700/60 p-3 text-[10px] leading-snug text-slate-600">
-        演示角色仅影响菜单与写权限；链上身份以 Gateway 固定 Org1 为准。
+        写操作经 Org1MSP 背书；学生/验真方经 Org2MSP 只读/核验。链码对写入再校验 MSP 与可选 abac.role。
       </div>
     </aside>
 
@@ -99,24 +108,13 @@ const nav = computed(() => {
           </el-breadcrumb>
           <span class="truncate text-xs text-slate-500">{{ route.path }}</span>
         </div>
-        <div class="flex shrink-0 items-center gap-4">
+        <div class="flex shrink-0 items-center gap-3">
           <div class="hidden text-right text-xs leading-tight text-slate-500 sm:block">
-            <div class="text-slate-300">当前身份</div>
-            <div class="font-medium text-cyan-200/90">{{ roleLabel[currentRole] }}</div>
+            <div class="text-slate-300">{{ authUser?.displayName ?? '—' }}</div>
+            <div class="font-medium text-cyan-200/90">{{ roleLabel(authUser?.role) }}</div>
+            <div class="font-mono text-[10px] text-slate-600">{{ authUser?.org }}</div>
           </div>
-          <el-select
-            v-model="currentRole"
-            class="role-select w-[200px]"
-            size="default"
-            placeholder="切换角色"
-          >
-            <el-option
-              v-for="opt in roleOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
+          <el-button size="small" type="danger" plain @click="logout">退出登录</el-button>
         </div>
       </header>
 
@@ -136,11 +134,6 @@ const nav = computed(() => {
 </template>
 
 <style scoped>
-.role-select :deep(.el-input__wrapper) {
-  background-color: rgba(15, 23, 42, 0.9);
-  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.25);
-}
-
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.18s ease;

@@ -8,8 +8,14 @@ import './assets/tailwind.css';
 import './style.css';
 import App from './App.vue';
 import router from './router';
+import { restoreAuth, validateSession } from './stores/auth';
+
+restoreAuth();
 
 const app = createApp(App);
 app.use(ElementPlus);
 app.use(router);
-app.mount('#app');
+
+void validateSession().finally(() => {
+  app.mount('#app');
+});
